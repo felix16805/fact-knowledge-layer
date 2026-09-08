@@ -3,7 +3,7 @@
 -- Supabase / Postgres + pgvector
 -- Run once in: Supabase Dashboard → SQL Editor
 --
--- IMPORTANT: Vector dimensions are 1024 to match Voyage AI voyage-3 output.
+-- IMPORTANT: Vector dimensions are 1024 to match Voyage AI voyage-4 output.
 -- =============================================================================
 
 -- Enable pgvector extension
@@ -34,7 +34,7 @@ create policy "service role write documents" on documents for all    using (auth
 -- CHUNKS
 -- Layout-aware text/table/slide units from the PDF parser sidecar.
 -- bbox is nullable — present for tables (from camelot), absent for prose chunks.
--- embedding: voyage-3, 1024-dim.
+-- embedding: voyage-4, 1024-dim.
 -- =============================================================================
 create table chunks (
   id            uuid        primary key default gen_random_uuid(),
@@ -44,7 +44,7 @@ create table chunks (
   raw_text      text        not null,
   chunk_type    text        not null default 'text'
                             check (chunk_type in ('text', 'table', 'slide')),
-  embedding     vector(1024)          -- Voyage AI voyage-3 output dims
+  embedding     vector(1024)          -- Voyage AI voyage-4 output dims
 );
 
 alter table chunks enable row level security;
@@ -60,7 +60,7 @@ create index chunks_embedding_idx on chunks using ivfflat (embedding vector_cosi
 -- Schema-free extracted facts. value is jsonb to accommodate numbers, strings,
 -- ranges, and structured objects without schema migration.
 -- Every fact MUST have a quoted_evidence span — no fact without evidence.
--- embedding: voyage-3, 1024-dim, of the canonical fact string.
+-- embedding: voyage-4, 1024-dim, of the canonical fact string.
 -- =============================================================================
 create table facts (
   id               uuid        primary key default gen_random_uuid(),
@@ -75,7 +75,7 @@ create table facts (
   qualifiers       jsonb,                  -- definition notes, adjustments, caveats
   quoted_evidence  text        not null,   -- verbatim span from the source chunk
   confidence       numeric     check (confidence between 0 and 1),
-  embedding        vector(1024),           -- Voyage AI voyage-3, 1024-dim
+  embedding        vector(1024),           -- Voyage AI voyage-4, 1024-dim
   created_at       timestamptz default now()
 );
 
@@ -136,16 +136,21 @@ create index fact_relationships_type_idx on fact_relationships (relationship_typ
 -- =============================================================================
 create table demo_cases (
   id              uuid  primary key default gen_random_uuid(),
-  case_number     int   not null check (case_number between 1 and 4),
   title           text  not null,
   description     text  not null,
-  relationship_id uuid  references fact_relationships(id) on delete set null,
-  notes           text  -- optional: explains why this relationship was chosen
+  analysis        text,
+  notes           text,
+  related_document_ids uuid[] not null default '{}'::uuid[],
+  related_fact_ids uuid[] not null default '{}'::uuid[],
+  created_at      timestamptz not null default now()
 );
 
 alter table demo_cases enable row level security;
-create policy "anon read demo cases"          on demo_cases for select using (true);
-create policy "service role write demo cases" on demo_cases for all    using (auth.role() = 'service_role');
+create policy "anon read demo cases"          on demo_cases for select to anon, authenticated using (true);
+
+create index demo_cases_created_at_idx on demo_cases (created_at desc);
+create index demo_cases_related_document_ids_idx on demo_cases using gin (related_document_ids);
+create index demo_cases_related_fact_ids_idx on demo_cases using gin (related_fact_ids);
 
 -- =============================================================================
 -- RATE LIMIT LOG
@@ -183,3 +188,69 @@ create policy "service role only rate limit" on rate_limit_log for all using (au
 --   Supabase → Project Settings → Database → Connection string → URI
 --   with "Use connection pooling" toggled OFF.
 -- =============================================================================
+
+-- =============================================================================
+-- HELPER FUNCTION: upsert_rate_limit
+-- Called by src/lib/rate-limit.ts. Atomically increments a rate-limit window
+-- counter and returns the current hit count.
+-- Uses INSERT ... ON CONFLICT ... DO UPDATE for safe concurrent upserts.
+-- =============================================================================
+create or replace function upsert_rate_limit(
+  p_ip        text,
+  p_endpoint  text,
+  p_window_start timestamptz
+) returns int
+language plpgsql
+security definer  -- runs as postgres superuser; bypasses RLS for this function
+as $$
+declare
+  v_count int;
+begin
+  insert into rate_limit_log (ip, endpoint, window_start, hit_count)
+  values (p_ip, p_endpoint, p_window_start, 1)
+  on conflict (ip, endpoint, window_start)
+  do update set hit_count = rate_limit_log.hit_count + 1;
+
+  select hit_count into v_count
+  from rate_limit_log
+  where ip = p_ip and endpoint = p_endpoint and window_start = p_window_start;
+
+  return v_count;
+end;
+$$;
+
+-- =============================================================================
+-- HELPER FUNCTION: find_similar_facts
+-- Vector cosine similarity search for candidate fact pairs.
+-- Excludes facts from the same document (cross-document matching only).
+-- Returns fact IDs and similarity scores, ordered by similarity desc.
+-- =============================================================================
+create or replace function find_similar_facts(
+  query_embedding     vector(1024),
+  exclude_document_id uuid,
+  similarity_threshold float default 0.82,
+  max_results         int   default 10
+) returns table(id uuid, similarity float)
+language sql
+stable
+as $$
+  select
+    f.id,
+    1 - (f.embedding <=> query_embedding) as similarity
+  from facts f
+  where
+    f.document_id != exclude_document_id
+    and f.embedding is not null
+    and 1 - (f.embedding <=> query_embedding) >= similarity_threshold
+  order by f.embedding <=> query_embedding  -- ascending distance = descending similarity
+  limit max_results;
+$$;
+
+-- =============================================================================
+-- STORAGE BUCKET: pdfs
+-- =============================================================================
+insert into storage.buckets (id, name, public)
+values ('pdfs', 'pdfs', false)
+on conflict (id) do update
+set name = excluded.name,
+    public = excluded.public;

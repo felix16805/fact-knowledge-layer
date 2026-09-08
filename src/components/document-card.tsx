@@ -1,0 +1,70 @@
+import Link from "next/link";
+import { formatDistanceToNow } from "date-fns";
+import { FileText, CheckCircle2, Clock, XCircle, AlertCircle } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+interface DocumentCardProps {
+  document: {
+    id: string;
+    filename: string;
+    status: string;
+    uploaded_at: string;
+    error_message: string | null;
+  };
+}
+
+export function DocumentCard({ document }: DocumentCardProps) {
+  const isFailed = document.status === "failed";
+  const isReady = document.status === "ready";
+  const isProcessing = !isFailed && !isReady;
+
+  return (
+    <Link 
+      href={`/documents/${document.id}`}
+      className={cn(
+        "group block border p-4 transition-colors hover:bg-secondary/20",
+        isFailed ? "border-destructive/50" : "border-border hover:border-muted-foreground/50"
+      )}
+    >
+      <div className="flex items-start justify-between">
+        <div className="flex items-start gap-3">
+          <div className={cn(
+            "p-2 mt-0.5",
+            isFailed ? "bg-destructive/10 text-destructive" : "bg-secondary text-muted-foreground group-hover:text-foreground transition-colors"
+          )}>
+            <FileText className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="font-mono text-sm font-medium break-all">
+              {document.filename}
+            </h3>
+            <p className="text-xs text-muted-foreground mt-1">
+              Uploaded {formatDistanceToNow(new Date(document.uploaded_at), { addSuffix: true })}
+            </p>
+          </div>
+        </div>
+        
+        <div className="flex flex-col items-end gap-1">
+          <div className={cn(
+            "flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 border uppercase tracking-wider",
+            isReady && "border-success/30 text-success bg-success/10",
+            isFailed && "border-destructive/30 text-destructive bg-destructive/10",
+            isProcessing && "border-accent/30 text-accent bg-accent/10"
+          )}>
+            {isReady && <CheckCircle2 className="w-3 h-3" />}
+            {isFailed && <XCircle className="w-3 h-3" />}
+            {isProcessing && <Clock className="w-3 h-3 animate-pulse" />}
+            {document.status}
+          </div>
+        </div>
+      </div>
+      
+      {isFailed && document.error_message && (
+        <div className="mt-4 text-xs text-destructive flex gap-2 items-start bg-destructive/5 p-2 border border-destructive/10">
+          <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <span className="font-mono">{document.error_message}</span>
+        </div>
+      )}
+    </Link>
+  );
+}
