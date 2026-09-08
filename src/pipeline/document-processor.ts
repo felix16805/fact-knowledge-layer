@@ -4,9 +4,8 @@ import { embedFacts, type FactForEmbedding } from "./embedder";
 import { classifyRelationship, type FactForClassification } from "./relationship-classifier";
 // pdf-parse is CJS-only. serverExternalPackages keeps webpack from bundling it;
 // require() at module scope is safe here since this file only runs server-side.
-// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
-const pdfParse = (require("pdf-parse/lib/pdf-parse.js") as any).default ?? require("pdf-parse/lib/pdf-parse.js") as
-  (buf: Buffer) => Promise<{ text: string; numpages: number }>;
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { PDFParse } = require("pdf-parse");
 
 // Cosine similarity threshold for candidate pair matching.
 const SIMILARITY_THRESHOLD = 0.82;
@@ -102,17 +101,18 @@ export async function processDocument({
 
     const pdfBuffer = Buffer.from(await fileData.arrayBuffer());
 
-    const parsed = await pdfParse(pdfBuffer);
+    const parser = new PDFParse(pdfBuffer);
+    const parsed = await parser.getText();
     const fullText = parsed.text;
 
-    // pdf-parse returns all text concatenated — split on form-feed (\f) characters
+    // pdf-parse v2 returns all text concatenated — split on form-feed (\f) characters
     // to approximate page breaks. If none exist, we'll just have 1 page.
     let pageTexts = fullText.split("\f").map((t: string) => t.trim()).filter(Boolean);
     
     if (pageTexts.length === 0 && fullText.trim().length > 0) {
       pageTexts = [fullText.trim()];
     }
-    const pageCount = Math.max(pageTexts.length, parsed.numpages || 1);
+    const pageCount = Math.max(pageTexts.length, parsed.total || 1);
 
     // ── 5. Split pages into chunks ─────────────────────────────────────────
     const rawChunks: Array<{
