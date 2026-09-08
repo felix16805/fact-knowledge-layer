@@ -4,8 +4,8 @@ import { embedFacts, type FactForEmbedding } from "./embedder";
 import { classifyRelationship, type FactForClassification } from "./relationship-classifier";
 // pdf-parse is CJS-only. serverExternalPackages keeps webpack from bundling it;
 // require() at module scope is safe here since this file only runs server-side.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { PDFParse } = require("pdf-parse");
+// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+const pdfParse = (require("pdf-parse/lib/pdf-parse.js") as any).default ?? require("pdf-parse/lib/pdf-parse.js");
 
 // Cosine similarity threshold for candidate pair matching.
 const SIMILARITY_THRESHOLD = 0.82;
@@ -102,8 +102,7 @@ export async function processDocument({
     const arrayBuffer = await fileData.arrayBuffer();
     const pdfBytes = new Uint8Array(arrayBuffer);
 
-    const parser = new PDFParse(pdfBytes);
-    const parsed = await parser.getText();
+    const parsed = await pdfParse(pdfBytes);
     const fullText = parsed.text;
 
     // pdf-parse v2 returns all text concatenated — split on form-feed (\f) characters
