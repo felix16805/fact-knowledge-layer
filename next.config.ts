@@ -13,7 +13,7 @@ const nextConfig: NextConfig = {
 
   // pg-boss, voyageai, and pdfjs-dist include Node.js native modules
   // that must not be bundled by webpack for the client
-  serverExternalPackages: ["pg-boss", "voyageai"],
+  serverExternalPackages: ["voyageai", "pdf-parse"],
 
   // Webpack config for PDF.js worker
   webpack: (config) => {

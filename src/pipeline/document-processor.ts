@@ -1,11 +1,8 @@
-import { createAdminClient } from "@/lib/supabase/server";
+import { createClient } from "@supabase/supabase-js";
 import { extractFacts } from "./fact-extractor";
 import { embedFacts, type FactForEmbedding } from "./embedder";
 import { classifyRelationship, type FactForClassification } from "./relationship-classifier";
-import { createRequire } from "node:module";
-const _require = createRequire(import.meta.url);
-// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-const pdfParse: (buf: Buffer, opts?: { pagerender?: (pd: { getTextContent: () => Promise<{ items: Array<{ str: string; hasEOL?: boolean }> }> }) => Promise<string> }) => Promise<{ text: string; numpages: number }> = _require("pdf-parse");
+
 
 // Cosine similarity threshold for candidate pair matching.
 const SIMILARITY_THRESHOLD = 0.82;
@@ -68,7 +65,10 @@ export async function processDocument({
   data: { documentId: string };
 }): Promise<void> {
   const { documentId } = data;
-  const supabase = await createAdminClient();
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
 
   console.log(`[pipeline] Starting document ${documentId}`);
 
@@ -102,28 +102,23 @@ export async function processDocument({
     const pdfBuffer = Buffer.from(await fileData.arrayBuffer());
 
     // ── 4. Parse PDF with pdf-parse (pure Node.js, no Python sidecar) ──────
+    // Require pdf-parse at call-time so Next.js webpack doesn't bundle it
+    // (pdf-parse is listed in serverExternalPackages in next.config.ts)
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pdfParseFn = require("pdf-parse") as (
+      buf: Buffer
+    ) => Promise<{ text: string; numpages: number }>;
+
+    const parsed = await pdfParseFn(pdfBuffer);
+    const fullText = parsed.text;
+    const pageCount = parsed.numpages || 1;
+
+    // pdf-parse returns all text concatenated — split into pseudo-pages by
+    // dividing total text evenly across page count for chunk labelling.
+    const charsPerPage = Math.ceil(fullText.length / pageCount);
     const pageTexts: string[] = [];
-    let pageCount = 0;
-
-    await pdfParse(pdfBuffer, {
-      pagerender: (pageData: { getTextContent: () => Promise<{ items: Array<{ str: string; hasEOL?: boolean }> }> }) => {
-        return pageData.getTextContent().then((textContent) => {
-          const text = textContent.items
-            .map((item) => item.str + (item.hasEOL ? "\n" : ""))
-            .join("");
-          pageTexts.push(text);
-          return text;
-        });
-      },
-    });
-
-    pageCount = pageTexts.length;
-
-    if (pageCount === 0) {
-      // Fallback: let pdf-parse extract all text at once if page render fails
-      const fallback = await pdfParse(pdfBuffer);
-      pageTexts.push(fallback.text);
-      pageCount = fallback.numpages || 1;
+    for (let p = 0; p < pageCount; p++) {
+      pageTexts.push(fullText.slice(p * charsPerPage, (p + 1) * charsPerPage));
     }
 
     // ── 5. Split pages into chunks ─────────────────────────────────────────
