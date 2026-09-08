@@ -49,7 +49,7 @@ export function DocumentCard({ document }: DocumentCardProps) {
             "flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 border uppercase tracking-wider",
             isReady && "border-success/30 text-success bg-success/10",
             isFailed && "border-destructive/30 text-destructive bg-destructive/10",
-            isProcessing && "border-accent/30 text-accent bg-accent/10"
+            isProcessing && "border-muted text-muted-foreground bg-muted/20"
           )}>
             {isReady && <CheckCircle2 className="w-3 h-3" />}
             {isFailed && <XCircle className="w-3 h-3" />}

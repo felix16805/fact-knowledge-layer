@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { RegisterDocumentSchema } from "@/lib/validators";
 import { enqueueDocumentProcessing } from "@/pipeline/job-queue";
@@ -80,20 +81,20 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Enqueue processing job ─────────────────────────────────────────────
-  try {
-    await enqueueDocumentProcessing(inserted.id);
-  } catch (err) {
-    // Enqueue failed — mark document as failed so it can be retried
-    await supabase
-      .from("documents")
-      .update({ status: "failed", error_message: "Failed to enqueue processing job" })
-      .eq("id", inserted.id);
-    console.error("[documents POST] Enqueue error:", err);
-    return NextResponse.json(
-      { error: "Failed to start processing. Try again." },
-      { status: 500 }
-    );
-  }
+  // We use Next.js's after() to run this in the background *after* the HTTP response
+  // is sent, ensuring Vercel doesn't freeze the serverless function mid-execution.
+  after(async () => {
+    try {
+      await enqueueDocumentProcessing(inserted.id);
+    } catch (err) {
+      console.error("[documents POST] Background processing error:", err);
+      // Fallback: update status to failed if it blows up synchronously
+      await supabase
+        .from("documents")
+        .update({ status: "failed", error_message: "Background processing crashed" })
+        .eq("id", inserted.id);
+    }
+  });
 
   return NextResponse.json(inserted, { status: 201 });
 }

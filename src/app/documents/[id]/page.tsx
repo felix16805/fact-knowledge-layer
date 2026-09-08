@@ -76,7 +76,7 @@ export default async function DocumentPage({
           </div>
 
           {isProcessing && (
-            <div className="p-8 text-center border border-dashed border-accent/30 text-accent bg-accent/5 font-mono text-sm animate-pulse">
+            <div className="p-8 text-center border border-dashed border-muted text-muted-foreground bg-muted/20 font-mono text-sm animate-pulse">
               Extraction in progress...
             </div>
           )}

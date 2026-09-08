@@ -5,7 +5,7 @@ import { classifyRelationship, type FactForClassification } from "./relationship
 // pdf-parse is CJS-only. serverExternalPackages keeps webpack from bundling it;
 // require() at module scope is safe here since this file only runs server-side.
 // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
-const pdfParse = (require("pdf-parse") as any).default ?? require("pdf-parse") as
+const pdfParse = (require("pdf-parse/lib/pdf-parse.js") as any).default ?? require("pdf-parse/lib/pdf-parse.js") as
   (buf: Buffer) => Promise<{ text: string; numpages: number }>;
 
 // Cosine similarity threshold for candidate pair matching.
@@ -257,6 +257,13 @@ export async function processDocument({
       confidence: number;
     }> = [];
 
+    const classificationTasks: Array<{
+      orderedA: string;
+      orderedB: string;
+      factA: FactForClassification;
+      factB: FactForClassification;
+    }> = [];
+
     for (let i = 0; i < storedFacts.length; i++) {
       const newFact = storedFacts[i];
       const embedding = embeddings[i];
@@ -328,21 +335,32 @@ export async function processDocument({
             (candidate.source_chunk as unknown as { page_number: number } | null)?.page_number ?? 0,
         };
 
-        const result = await classifyRelationship(
-          factAForClassification,
-          factBForClassification
-        );
-
-        relationships.push({
-          fact_a_id: orderedA,
-          fact_b_id: orderedB,
-          relationship_type: result.type,
-          reasoning: result.reasoning,
-          reconciling_factor:
-            result.type === "reconcilable" ? result.reconciling_factor : null,
-          confidence: result.confidence,
+        classificationTasks.push({
+          orderedA,
+          orderedB,
+          factA: factAForClassification,
+          factB: factBForClassification,
         });
       }
+    }
+
+    // Process candidate pairs in batches to avoid rate limits while maximizing concurrency
+    for (let i = 0; i < classificationTasks.length; i += CHUNK_BATCH_SIZE) {
+      const batch = classificationTasks.slice(i, i + CHUNK_BATCH_SIZE);
+      const batchResults = await Promise.all(
+        batch.map(async (task) => {
+          const result = await classifyRelationship(task.factA, task.factB);
+          return {
+            fact_a_id: task.orderedA,
+            fact_b_id: task.orderedB,
+            relationship_type: result.type,
+            reasoning: result.reasoning,
+            reconciling_factor: result.type === "reconcilable" ? result.reconciling_factor : null,
+            confidence: result.confidence,
+          };
+        })
+      );
+      relationships.push(...batchResults);
     }
 
     // ── 11. Persist relationships ───────────────────────────────────────────
