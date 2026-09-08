@@ -99,9 +99,10 @@ export async function processDocument({
       throw new Error(`Failed to download PDF: ${fileError?.message}`);
     }
 
-    const pdfBuffer = Buffer.from(await fileData.arrayBuffer());
+    const arrayBuffer = await fileData.arrayBuffer();
+    const pdfBytes = new Uint8Array(arrayBuffer);
 
-    const parser = new PDFParse(pdfBuffer);
+    const parser = new PDFParse(pdfBytes);
     const parsed = await parser.getText();
     const fullText = parsed.text;
 

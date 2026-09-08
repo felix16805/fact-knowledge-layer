@@ -5,6 +5,7 @@ import { FactCard } from "@/components/fact-card";
 import { CheckCircle2, Clock, XCircle, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { DocumentPoller } from "@/components/document-poller";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,8 @@ export default async function DocumentPage({
 
   return (
     <div className="flex flex-col h-[calc(100vh-3.5rem)] lg:h-screen w-full">
+      <DocumentPoller id={id} status={doc.status} initialFactCount={facts?.length || 0} />
+      
       <header className="shrink-0 flex items-center justify-between p-4 border-b border-border bg-card">
         <div className="flex items-center gap-4">
           <Link href="/" className="p-2 hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors border border-transparent hover:border-border">
