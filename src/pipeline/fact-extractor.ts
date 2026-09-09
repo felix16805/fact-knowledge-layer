@@ -4,7 +4,7 @@ import { withGeminiBackoff } from "@/lib/gemini-retry";
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 const PRIMARY_MODEL = "gemini-3.6-flash";
-const FALLBACK_MODEL = "gemini-2.5-flash"; // Still reachable for existing keys as a fallback
+const FALLBACK_MODEL = "gemini-3-flash";
 
 // ============================================================
 // Types
