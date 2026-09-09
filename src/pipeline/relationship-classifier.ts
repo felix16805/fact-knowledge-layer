@@ -122,13 +122,17 @@ export async function classifyRelationship(
     const status = err?.status ?? err?.code;
     const isUnavailable =
       status === 503 ||
+      status === 429 ||
       err?.message?.includes("503") ||
+      err?.message?.includes("429") ||
       err?.message?.includes("UNAVAILABLE") ||
       err?.message?.toLowerCase().includes("high demand") ||
-      err?.message?.toLowerCase().includes("overloaded");
+      err?.message?.toLowerCase().includes("overloaded") ||
+      err?.message?.toLowerCase().includes("quota") ||
+      err?.message?.toLowerCase().includes("rate limit");
 
     if (isUnavailable) {
-      console.warn(`[fallback] Primary model 503 after retries. Falling back to ${FALLBACK_MODEL}...`);
+      console.warn(`[fallback] Primary model exhausted/unavailable after retries. Falling back to ${FALLBACK_MODEL}...`);
       response = await withGeminiBackoff(() =>
         ai.models.generateContent({ model: FALLBACK_MODEL, ...callConfig })
       );
