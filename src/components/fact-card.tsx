@@ -30,18 +30,18 @@ export function FactCard({ fact, onClick, selected }: FactCardProps) {
       )}
     >
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="text-xs font-mono text-muted-foreground mb-1 uppercase tracking-wider">
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-mono text-muted-foreground mb-1 uppercase tracking-wider truncate">
             {fact.subject}
           </div>
-          <h4 className="font-medium text-sm text-foreground">
+          <h4 className="font-medium text-sm text-foreground break-words">
             {fact.metric}
           </h4>
         </div>
-        <div className="text-right shrink-0">
-          <div className="font-mono text-lg font-semibold">
+        <div className="text-right shrink-0 max-w-[50%]">
+          <div className="font-mono text-lg font-semibold break-words">
             {valueDisplay}
-            {fact.unit && <span className="text-xs text-muted-foreground ml-1">{fact.unit}</span>}
+            {fact.unit && <span className="text-xs text-muted-foreground ml-1 break-words">{fact.unit}</span>}
           </div>
         </div>
       </div>
@@ -65,7 +65,7 @@ export function FactCard({ fact, onClick, selected }: FactCardProps) {
       {fact.document && (
         <div className="mt-2 pt-3 border-t border-border flex items-start gap-2 text-xs text-muted-foreground">
           <Quote className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-          <p className="line-clamp-2 italic">"{fact.quoted_evidence}"</p>
+          <p className="line-clamp-2 italic break-words min-w-0">"{fact.quoted_evidence}"</p>
         </div>
       )}
     </div>

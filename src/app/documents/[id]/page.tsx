@@ -42,11 +42,11 @@ export default async function DocumentPage({
       <DocumentPoller id={id} status={doc.status} initialFactCount={facts?.length || 0} />
       
       <header className="shrink-0 flex items-center justify-between p-4 border-b border-border bg-card">
-        <div className="flex items-center gap-4">
-          <Link href="/" className="p-2 hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors border border-transparent hover:border-border">
+        <div className="flex items-center gap-4 min-w-0">
+          <Link href="/" className="shrink-0 p-2 hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors border border-transparent hover:border-border">
             <ArrowLeft className="w-4 h-4" />
           </Link>
-          <div>
+          <div className="min-w-0">
             <h1 className="font-mono font-semibold tracking-tight truncate max-w-sm md:max-w-xl">{doc.filename}</h1>
             <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
               <div className={cn(

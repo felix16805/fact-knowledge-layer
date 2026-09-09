@@ -29,19 +29,19 @@ export function DocumentCard({ document }: DocumentCardProps) {
         isFailed ? "border-destructive/50" : "border-border hover:border-muted-foreground/50"
       )}
     >
-      <div className="flex items-start justify-between">
-        <div className="flex items-start gap-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3 min-w-0">
           <div className={cn(
-            "p-2 mt-0.5",
+            "shrink-0 p-2 mt-0.5",
             isFailed ? "bg-destructive/10 text-destructive" : "bg-secondary text-muted-foreground group-hover:text-foreground transition-colors"
           )}>
             <FileText className="w-5 h-5" />
           </div>
-          <div>
+          <div className="min-w-0">
             <h3 className="font-mono text-sm font-medium break-all">
               {document.filename}
             </h3>
-            <p className="text-xs text-muted-foreground mt-1">
+            <p className="text-xs text-muted-foreground mt-1 truncate">
               Uploaded {formatDistanceToNow(new Date(document.uploaded_at), { addSuffix: true })}
             </p>
           </div>
@@ -88,7 +88,7 @@ export function DocumentCard({ document }: DocumentCardProps) {
       {isFailed && document.error_message && (
         <div className="mt-4 text-xs text-destructive flex gap-2 items-start bg-destructive/5 p-2 border border-destructive/10">
           <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-          <span className="font-mono">{document.error_message}</span>
+          <span className="font-mono break-words min-w-0">{document.error_message}</span>
         </div>
       )}
     </Link>
