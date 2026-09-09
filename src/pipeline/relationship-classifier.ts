@@ -5,7 +5,7 @@ import type { RelationshipType } from "@/lib/validators";
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 const PRIMARY_MODEL = "gemini-3.6-flash";
-const FALLBACK_MODEL = "gemini-3-flash";
+const FALLBACK_MODEL = "gemini-3.5-flash";
 
 // ============================================================
 // Types
