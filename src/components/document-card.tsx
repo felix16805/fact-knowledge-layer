@@ -10,6 +10,9 @@ interface DocumentCardProps {
     status: string;
     uploaded_at: string;
     error_message: string | null;
+    chunks_total: number;
+    chunks_processed: number;
+    current_stage: string | null;
   };
 }
 
@@ -58,6 +61,29 @@ export function DocumentCard({ document }: DocumentCardProps) {
           </div>
         </div>
       </div>
+      
+      {isProcessing && document.current_stage && (
+        <div className="mt-4 border-t pt-3">
+          <div className="flex justify-between items-center mb-1 text-xs">
+            <span className="text-muted-foreground uppercase font-mono tracking-wider">
+              {document.current_stage}
+            </span>
+            {document.chunks_total > 0 && (
+              <span className="font-mono text-muted-foreground">
+                {document.chunks_processed} / {document.chunks_total} chunks
+              </span>
+            )}
+          </div>
+          {document.chunks_total > 0 && (
+            <div className="w-full bg-secondary h-1">
+              <div 
+                className="bg-primary h-1 transition-all duration-500 ease-in-out" 
+                style={{ width: \`\${Math.max(5, (document.chunks_processed / document.chunks_total) * 100)}%\` }}
+              />
+            </div>
+          )}
+        </div>
+      )}
       
       {isFailed && document.error_message && (
         <div className="mt-4 text-xs text-destructive flex gap-2 items-start bg-destructive/5 p-2 border border-destructive/10">

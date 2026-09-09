@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type, FunctionCallingConfigMode } from "@google/genai";
-import { withGeminiBackoff } from "@/lib/gemini-retry";
+import { paceGeminiCall } from "@/lib/gemini-retry";
 import type { RelationshipType } from "@/lib/validators";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
@@ -101,7 +101,8 @@ If the facts cover different metrics or entities, use 'insufficient_context'.`;
 
 export async function classifyRelationship(
   factA: FactForClassification,
-  factB: FactForClassification
+  factB: FactForClassification,
+  onRetry?: (delayMs: number, attempt: number) => void
 ): Promise<RelationshipResult> {
   const callConfig = {
     contents: [{ role: "user", parts: [{ text: buildPrompt(factA, factB) }] }],
@@ -115,8 +116,9 @@ export async function classifyRelationship(
 
   let response;
   try {
-    response = await withGeminiBackoff(() =>
-      ai.models.generateContent({ model: PRIMARY_MODEL, ...callConfig })
+    response = await paceGeminiCall(
+      () => ai.models.generateContent({ model: PRIMARY_MODEL, ...callConfig }),
+      { onRetry }
     );
   } catch (err: any) {
     const status = err?.status ?? err?.code;
@@ -133,8 +135,9 @@ export async function classifyRelationship(
 
     if (isUnavailable) {
       console.warn(`[fallback] Primary model exhausted/unavailable after retries. Falling back to ${FALLBACK_MODEL}...`);
-      response = await withGeminiBackoff(() =>
-        ai.models.generateContent({ model: FALLBACK_MODEL, ...callConfig })
+      response = await paceGeminiCall(
+        () => ai.models.generateContent({ model: FALLBACK_MODEL, ...callConfig }),
+        { onRetry }
       );
     } else {
       throw err;

@@ -61,6 +61,16 @@ export default async function DocumentPage({
                 {doc.status}
               </div>
               <span className="font-mono">{facts?.length || 0} facts extracted</span>
+              
+              {isProcessing && doc.current_stage && (
+                <>
+                  <span className="text-border mx-1">|</span>
+                  <span className="font-mono text-accent">{doc.current_stage}</span>
+                  {doc.chunks_total > 0 && (
+                    <span className="font-mono text-accent">({doc.chunks_processed}/{doc.chunks_total} chunks)</span>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -79,8 +89,14 @@ export default async function DocumentPage({
           </div>
 
           {isProcessing && (
-            <div className="p-8 text-center border border-dashed border-muted text-muted-foreground bg-muted/20 font-mono text-sm animate-pulse">
-              Extraction in progress...
+            <div className="p-8 text-center border border-dashed border-muted text-muted-foreground bg-muted/20 font-mono text-sm">
+              <div className="animate-pulse mb-2">Extraction in progress...</div>
+              {doc.current_stage && (
+                <div className="text-accent uppercase tracking-wider text-xs">
+                  {doc.current_stage}
+                  {doc.chunks_total > 0 && ` (${doc.chunks_processed}/${doc.chunks_total} chunks)`}
+                </div>
+              )}
             </div>
           )}
 

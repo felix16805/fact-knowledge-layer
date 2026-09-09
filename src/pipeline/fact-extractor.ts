@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type, FunctionCallingConfigMode } from "@google/genai";
-import { withGeminiBackoff } from "@/lib/gemini-retry";
+import { paceGeminiCall } from "@/lib/gemini-retry";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
@@ -11,6 +11,7 @@ const FALLBACK_MODEL = "gemini-3.5-flash";
 // ============================================================
 
 export interface ExtractedFact {
+  source_chunk_id?: string;
   subject: string;
   metric: string;
   value: unknown;
@@ -22,7 +23,8 @@ export interface ExtractedFact {
   confidence: number;
 }
 
-interface Chunk {
+export interface Chunk {
+  id: string;
   page_number: number;
   chunk_type: "text" | "table" | "slide";
   raw_text: string;
@@ -46,6 +48,10 @@ const factExtractionTool = {
         items: {
           type: Type.OBJECT,
           properties: {
+            source_chunk_id: {
+              type: Type.STRING,
+              description: 'The ID of the chunk this fact was extracted from. Extremely important to match the <id> provided.',
+            },
             subject: {
               type: Type.STRING,
               description: 'The entity this fact is about. e.g. "Delhivery", "India", "RBI"',
@@ -104,19 +110,26 @@ Rules:
 // Main extraction function
 // ============================================================
 
-export async function extractFacts(chunk: Chunk): Promise<ExtractedFact[]> {
-  if (!chunk.raw_text || chunk.raw_text.trim().length < 20) {
-    return [];
-  }
+export async function extractFacts(
+  chunks: Chunk[],
+  onRetry?: (delayMs: number, attempt: number) => void
+): Promise<ExtractedFact[]> {
+  const validChunks = chunks.filter((c) => c.raw_text && c.raw_text.trim().length >= 20);
+  if (validChunks.length === 0) return [];
+
+  const chunksText = validChunks
+    .map(
+      (c, idx) =>
+        `Section ${idx + 1} (chunk_id: ${c.id}):\n---\n${c.raw_text}\n---`
+    )
+    .join("\n\n");
 
   const prompt = `${SYSTEM_PROMPT}
 
-Document chunk (page ${chunk.page_number}, type: ${chunk.chunk_type}):
----
-${chunk.raw_text}
----
+The following are multiple consecutive sections of a document. 
+Extract all verifiable factual claims from this text.
 
-Extract all verifiable factual claims from this text.`;
+${chunksText}`;
 
   const callConfig = {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
@@ -132,8 +145,9 @@ Extract all verifiable factual claims from this text.`;
 
   let response;
   try {
-    response = await withGeminiBackoff(() =>
-      ai.models.generateContent({ model: PRIMARY_MODEL, ...callConfig })
+    response = await paceGeminiCall(
+      () => ai.models.generateContent({ model: PRIMARY_MODEL, ...callConfig }),
+      { onRetry }
     );
   } catch (err: any) {
     const status = err?.status ?? err?.code;
@@ -150,8 +164,9 @@ Extract all verifiable factual claims from this text.`;
 
     if (isUnavailable) {
       console.warn(`[fallback] Primary model exhausted/unavailable after retries. Falling back to ${FALLBACK_MODEL}...`);
-      response = await withGeminiBackoff(() =>
-        ai.models.generateContent({ model: FALLBACK_MODEL, ...callConfig })
+      response = await paceGeminiCall(
+        () => ai.models.generateContent({ model: FALLBACK_MODEL, ...callConfig }),
+        { onRetry }
       );
     } else {
       throw err;
@@ -166,6 +181,7 @@ Extract all verifiable factual claims from this text.`;
       if (part.functionCall?.name === "extract_facts") {
         const args = part.functionCall.args as {
           facts: Array<{
+            source_chunk_id?: string;
             subject: string;
             metric: string;
             value: string;
@@ -189,6 +205,7 @@ Extract all verifiable factual claims from this text.`;
           }
 
           facts.push({
+            source_chunk_id: f.source_chunk_id,
             subject: f.subject,
             metric: f.metric,
             value: f.value,
@@ -204,5 +221,11 @@ Extract all verifiable factual claims from this text.`;
     }
   }
 
-  return facts;
+  // If a chunk ID wasn't matched, default it to the first chunk of the batch
+  return facts.map((f) => {
+    if (!f.source_chunk_id || !validChunks.find((c) => c.id === f.source_chunk_id)) {
+      return { ...f, source_chunk_id: validChunks[0].id };
+    }
+    return f;
+  });
 }

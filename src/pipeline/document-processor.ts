@@ -161,7 +161,11 @@ export async function processDocument({
 
     await supabase
       .from("documents")
-      .update({ page_count: pageCount })
+      .update({ 
+        page_count: pageCount,
+        chunks_total: storedChunks.length,
+        current_stage: "extracting"
+      })
       .eq("id", documentId);
 
     // ── 7. Extract facts per chunk (batched for rate limit) ────────────────
@@ -180,28 +184,45 @@ export async function processDocument({
       page_number: number;
     }> = [];
 
-    for (let i = 0; i < storedChunks.length; i += CHUNK_BATCH_SIZE) {
-      const batch = storedChunks.slice(i, i + CHUNK_BATCH_SIZE) as Chunk[];
-      const batchResults = await Promise.all(
-        batch.map(async (chunk) => {
-          const facts = await extractFacts(chunk);
-          return facts.map((f) => ({
-            document_id: documentId,
-            source_chunk_id: chunk.id,
-            subject: f.subject,
-            metric: f.metric,
-            value: f.value,
-            unit: f.unit,
-            time_scope: f.time_scope,
-            doc_scope: f.doc_scope,
-            qualifiers: f.qualifiers,
-            quoted_evidence: f.quoted_evidence,
-            confidence: f.confidence,
-            page_number: chunk.page_number,
-          }));
+    for (let i = 0; i < storedChunks.length; i += 10) {
+      const batch = storedChunks.slice(i, i + 10) as Chunk[];
+      
+      const onRetry = async (delayMs: number, attempt: number) => {
+        await supabase
+          .from("documents")
+          .update({ current_stage: `rate_limited_retrying (delay: ${delayMs / 1000}s, attempt: ${attempt})` })
+          .eq("id", documentId);
+      };
+
+      const facts = await extractFacts(batch, onRetry);
+      
+      const mappedFacts = facts.map((f) => {
+        const chunk = batch.find((c) => c.id === f.source_chunk_id) ?? batch[0];
+        return {
+          document_id: documentId,
+          source_chunk_id: chunk.id,
+          subject: f.subject,
+          metric: f.metric,
+          value: f.value,
+          unit: f.unit,
+          time_scope: f.time_scope,
+          doc_scope: f.doc_scope,
+          qualifiers: f.qualifiers,
+          quoted_evidence: f.quoted_evidence,
+          confidence: f.confidence,
+          page_number: chunk.page_number,
+        };
+      });
+
+      allNewFacts.push(...mappedFacts);
+
+      await supabase
+        .from("documents")
+        .update({ 
+          chunks_processed: Math.min(i + 10, storedChunks.length),
+          current_stage: "extracting"
         })
-      );
-      allNewFacts.push(...batchResults.flat());
+        .eq("id", documentId);
     }
 
     console.log(`[pipeline] Extracted ${allNewFacts.length} facts`);
@@ -209,12 +230,16 @@ export async function processDocument({
     if (allNewFacts.length === 0) {
       await supabase
         .from("documents")
-        .update({ status: "ready" })
+        .update({ status: "ready", current_stage: "completed" })
         .eq("id", documentId);
       return;
     }
 
     // ── 8. Embed all new facts ─────────────────────────────────────────────
+    await supabase
+      .from("documents")
+      .update({ current_stage: "embedding" })
+      .eq("id", documentId);
     const embedInputs: FactForEmbedding[] = allNewFacts.map((f) => ({
       subject: f.subject,
       metric: f.metric,
@@ -246,11 +271,16 @@ export async function processDocument({
       )
       .select("id, subject, metric, value, time_scope, doc_scope, qualifiers, quoted_evidence");
 
-    if (factError || !storedFacts) {
-      throw new Error(`Failed to store facts: ${factError?.message}`);
-    }
+      if (factError || !storedFacts) {
+        throw new Error(`Failed to store facts: ${factError?.message}`);
+      }
+  
+      await supabase
+        .from("documents")
+        .update({ current_stage: "classifying" })
+        .eq("id", documentId);
 
-    // ── 10. Vector-search for candidate pairs from OTHER documents ──────────
+      // ── 10. Find matching candidates and classify relationships ──────────────
     const relationships: Array<{
       fact_a_id: string;
       fact_b_id: string;
@@ -347,45 +377,50 @@ export async function processDocument({
       }
     }
 
-    // Process candidate pairs in batches to avoid rate limits while maximizing concurrency
-    for (let i = 0; i < classificationTasks.length; i += CHUNK_BATCH_SIZE) {
-      const batch = classificationTasks.slice(i, i + CHUNK_BATCH_SIZE);
-      const batchResults = await Promise.all(
-        batch.map(async (task) => {
-          const result = await classifyRelationship(task.factA, task.factB);
-          return {
-            fact_a_id: task.orderedA,
-            fact_b_id: task.orderedB,
-            relationship_type: result.type,
-            reasoning: result.reasoning,
-            reconciling_factor: result.type === "reconcilable" ? result.reconciling_factor : null,
-            confidence: result.confidence,
-          };
-        })
-      );
-      relationships.push(...batchResults);
+    // Process candidate pairs sequentially to enforce pacing limit
+    for (const task of classificationTasks) {
+      const onRetry = async (delayMs: number, attempt: number) => {
+        await supabase
+          .from("documents")
+          .update({ current_stage: `rate_limited_retrying (classifying delay: ${delayMs / 1000}s)` })
+          .eq("id", documentId);
+      };
+
+      const result = await classifyRelationship(task.factA, task.factB, onRetry);
+      relationships.push({
+        fact_a_id: task.orderedA,
+        fact_b_id: task.orderedB,
+        relationship_type: result.type,
+        reasoning: result.reasoning,
+        reconciling_factor: result.type === "reconcilable" ? result.reconciling_factor : null,
+        confidence: result.confidence,
+      });
+
+      // Update current_stage back in case it was stuck in retrying
+      await supabase
+        .from("documents")
+        .update({ current_stage: `classifying (${relationships.length}/${classificationTasks.length} pairs)` })
+        .eq("id", documentId);
     }
 
     // ── 11. Persist relationships ───────────────────────────────────────────
     if (relationships.length > 0) {
       const { error: relError } = await supabase
         .from("fact_relationships")
-        .upsert(relationships, { onConflict: "fact_a_id,fact_b_id" });
+        .insert(relationships);
 
       if (relError) {
-        console.error("[pipeline] Failed to store relationships:", relError.message);
+        console.error(`[pipeline] Failed to store relationships for ${documentId}:`, relError);
+      } else {
+        console.log(`[pipeline] Stored ${relationships.length} relationships`);
       }
     }
 
-    console.log(
-      `[pipeline] Done: ${storedFacts.length} facts, ${relationships.length} relationships`
-    );
-
-    // ── 12. Mark ready ─────────────────────────────────────────────────────
     await supabase
       .from("documents")
-      .update({ status: "ready" })
+      .update({ status: "ready", current_stage: "completed" })
       .eq("id", documentId);
+    console.log(`[pipeline] Finished document ${documentId}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[pipeline] Failed document ${documentId}:`, message);

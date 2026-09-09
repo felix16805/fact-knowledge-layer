@@ -18,7 +18,7 @@ export async function GET(
   const { data, error } = await supabase
     .from("documents")
     .select(
-      `status, page_count, error_message, facts:facts(count)`
+      `status, page_count, error_message, chunks_total, chunks_processed, current_stage, facts:facts(count)`
     )
     .eq("id", id)
     .single();
@@ -31,6 +31,9 @@ export async function GET(
     status: data.status,
     page_count: data.page_count ?? null,
     error_message: data.error_message ?? null,
+    chunks_total: data.chunks_total ?? 0,
+    chunks_processed: data.chunks_processed ?? 0,
+    current_stage: data.current_stage ?? null,
     fact_count: (data.facts as unknown as [{ count: number }])?.[0]?.count ?? 0,
   });
 }

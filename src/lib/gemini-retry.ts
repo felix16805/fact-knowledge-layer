@@ -9,39 +9,38 @@
  * Usage:
  *   const result = await withGeminiBackoff(() => model.generateContent(prompt))
  */
+const MIN_INTERVAL_MS = 13_000 // 5 RPM = one call per 12s minimum; 13s for safety margin
+
 export async function withGeminiBackoff<T>(
   fn: () => Promise<T>,
-  maxRetries = 4
+  opts: { maxRetries?: number; onRetry?: (delayMs: number, attempt: number) => void } = {}
 ): Promise<T> {
+  const { maxRetries = 4, onRetry } = opts
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
     } catch (err: unknown) {
       const e = err as { status?: number; code?: number; message?: string };
       const status = e?.status ?? e?.code;
-      const isRetryable =
-        status === 429 ||
-        status === 503 ||
-        e?.message?.includes("429") ||
-        e?.message?.includes("503") ||
-        e?.message?.includes("UNAVAILABLE") ||
-        e?.message?.toLowerCase().includes("rate limit") ||
-        e?.message?.toLowerCase().includes("quota") ||
-        e?.message?.toLowerCase().includes("unavailable") ||
-        e?.message?.toLowerCase().includes("high demand") ||
-        e?.message?.toLowerCase().includes("overloaded");
+      const msg = e?.message?.toLowerCase() ?? "";
 
-      if (!isRetryable || attempt === maxRetries) {
-        throw err;
-      }
+      const is429 = status === 429 || msg.includes("429") || msg.includes("quota") || msg.includes("rate limit");
+      const is503 = status === 503 || msg.includes("503") || msg.includes("unavailable") || msg.includes("overloaded") || msg.includes("high demand");
 
-      const delayMs = Math.min(1000 * Math.pow(2, attempt), 30_000);
-      console.warn(
-        `[gemini-retry] API rate limited or overloaded (attempt ${attempt + 1}/${maxRetries}). Retrying in ${delayMs}ms...`
-      );
-      await new Promise((r) => setTimeout(r, delayMs));
+      if (!is429 && !is503) throw err;
+      if (attempt === maxRetries) throw err;
+
+      const delay = Math.min(1000 * Math.pow(2, attempt), 30_000);
+      console.warn(`[gemini-retry] API rate limited or overloaded (attempt ${attempt + 1}/${maxRetries}). Retrying in ${delay}ms...`);
+      onRetry?.(delay, attempt + 1);
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
-  // TypeScript exhaustiveness — this line is unreachable
-  throw new Error("[gemini-retry] Unreachable: exhausted retries without throwing");
+  throw new Error("unreachable");
+}
+
+export async function paceGeminiCall<T>(fn: () => Promise<T>, opts?: Parameters<typeof withGeminiBackoff>[1]): Promise<T> {
+  const result = await withGeminiBackoff(fn, opts)
+  await new Promise(r => setTimeout(r, MIN_INTERVAL_MS))
+  return result
 }
