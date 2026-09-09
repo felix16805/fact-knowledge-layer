@@ -78,7 +78,7 @@ export function DocumentCard({ document }: DocumentCardProps) {
             <div className="w-full bg-secondary h-1">
               <div 
                 className="bg-primary h-1 transition-all duration-500 ease-in-out" 
-                style={{ width: \`\${Math.max(5, (document.chunks_processed / document.chunks_total) * 100)}%\` }}
+                style={{ width: `${Math.max(5, (document.chunks_processed / document.chunks_total) * 100)}%` }}
               />
             </div>
           )}
