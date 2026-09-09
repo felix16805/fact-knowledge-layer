@@ -5,7 +5,10 @@ import { classifyRelationship, type FactForClassification } from "./relationship
 // pdf-parse is CJS-only. serverExternalPackages keeps webpack from bundling it;
 // require() at module scope is safe here since this file only runs server-side.
 // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
-const pdfParse = (require("pdf-parse/lib/pdf-parse.js") as any).default ?? require("pdf-parse/lib/pdf-parse.js");
+if (typeof module !== 'undefined' && !module.parent) {
+  module.parent = module as any; // mock to prevent pdf-parse v1 from crashing in serverless
+}
+const pdfParse = require("pdf-parse");
 
 // Cosine similarity threshold for candidate pair matching.
 const SIMILARITY_THRESHOLD = 0.82;
