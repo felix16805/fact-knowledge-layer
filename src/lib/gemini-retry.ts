@@ -17,20 +17,27 @@ export async function withGeminiBackoff<T>(
     try {
       return await fn();
     } catch (err: unknown) {
-      const e = err as { status?: number; message?: string };
-      const is429 =
-        e?.status === 429 ||
+      const e = err as { status?: number; code?: number; message?: string };
+      const status = e?.status ?? e?.code;
+      const isRetryable =
+        status === 429 ||
+        status === 503 ||
         e?.message?.includes("429") ||
+        e?.message?.includes("503") ||
+        e?.message?.includes("UNAVAILABLE") ||
         e?.message?.toLowerCase().includes("rate limit") ||
-        e?.message?.toLowerCase().includes("quota");
+        e?.message?.toLowerCase().includes("quota") ||
+        e?.message?.toLowerCase().includes("unavailable") ||
+        e?.message?.toLowerCase().includes("high demand") ||
+        e?.message?.toLowerCase().includes("overloaded");
 
-      if (!is429 || attempt === maxRetries) {
+      if (!isRetryable || attempt === maxRetries) {
         throw err;
       }
 
       const delayMs = Math.min(1000 * Math.pow(2, attempt), 30_000);
       console.warn(
-        `[gemini-retry] 429 rate limited, attempt ${attempt + 1}/${maxRetries}. Retrying in ${delayMs}ms...`
+        `[gemini-retry] API rate limited or overloaded (attempt ${attempt + 1}/${maxRetries}). Retrying in ${delayMs}ms...`
       );
       await new Promise((r) => setTimeout(r, delayMs));
     }

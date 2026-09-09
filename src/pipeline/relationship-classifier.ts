@@ -4,7 +4,8 @@ import type { RelationshipType } from "@/lib/validators";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
-const MODEL = "gemini-3.6-flash";
+const PRIMARY_MODEL = "gemini-3.6-flash";
+const FALLBACK_MODEL = "gemini-2.5-flash";
 
 // ============================================================
 // Types
@@ -102,18 +103,39 @@ export async function classifyRelationship(
   factA: FactForClassification,
   factB: FactForClassification
 ): Promise<RelationshipResult> {
-  const response = await withGeminiBackoff(() =>
-    ai.models.generateContent({
-      model: MODEL,
-      contents: [{ role: "user", parts: [{ text: buildPrompt(factA, factB) }] }],
-      config: {
-        tools: [{ functionDeclarations: [classifyTool] }],
-        toolConfig: {
-          functionCallingConfig: { mode: FunctionCallingConfigMode.ANY },
-        },
+  const callConfig = {
+    contents: [{ role: "user", parts: [{ text: buildPrompt(factA, factB) }] }],
+    config: {
+      tools: [{ functionDeclarations: [classifyTool] }],
+      toolConfig: {
+        functionCallingConfig: { mode: FunctionCallingConfigMode.ANY },
       },
-    })
-  );
+    },
+  };
+
+  let response;
+  try {
+    response = await withGeminiBackoff(() =>
+      ai.models.generateContent({ model: PRIMARY_MODEL, ...callConfig })
+    );
+  } catch (err: any) {
+    const status = err?.status ?? err?.code;
+    const isUnavailable =
+      status === 503 ||
+      err?.message?.includes("503") ||
+      err?.message?.includes("UNAVAILABLE") ||
+      err?.message?.toLowerCase().includes("high demand") ||
+      err?.message?.toLowerCase().includes("overloaded");
+
+    if (isUnavailable) {
+      console.warn(`[fallback] Primary model 503 after retries. Falling back to ${FALLBACK_MODEL}...`);
+      response = await withGeminiBackoff(() =>
+        ai.models.generateContent({ model: FALLBACK_MODEL, ...callConfig })
+      );
+    } else {
+      throw err;
+    }
+  }
 
   const candidates = response.candidates ?? [];
 

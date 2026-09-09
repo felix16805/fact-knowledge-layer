@@ -3,7 +3,8 @@ import { withGeminiBackoff } from "@/lib/gemini-retry";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
-const MODEL = "gemini-3.6-flash";
+const PRIMARY_MODEL = "gemini-3.6-flash";
+const FALLBACK_MODEL = "gemini-2.5-flash"; // Still reachable for existing keys as a fallback
 
 // ============================================================
 // Types
@@ -117,20 +118,41 @@ ${chunk.raw_text}
 
 Extract all verifiable factual claims from this text.`;
 
-  const response = await withGeminiBackoff(() =>
-    ai.models.generateContent({
-      model: MODEL,
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: {
-        tools: [{ functionDeclarations: [factExtractionTool] }],
-        toolConfig: {
-          functionCallingConfig: {
-            mode: FunctionCallingConfigMode.ANY,
-          },
+  const callConfig = {
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    config: {
+      tools: [{ functionDeclarations: [factExtractionTool] }],
+      toolConfig: {
+        functionCallingConfig: {
+          mode: FunctionCallingConfigMode.ANY,
         },
       },
-    })
-  );
+    },
+  };
+
+  let response;
+  try {
+    response = await withGeminiBackoff(() =>
+      ai.models.generateContent({ model: PRIMARY_MODEL, ...callConfig })
+    );
+  } catch (err: any) {
+    const status = err?.status ?? err?.code;
+    const isUnavailable =
+      status === 503 ||
+      err?.message?.includes("503") ||
+      err?.message?.includes("UNAVAILABLE") ||
+      err?.message?.toLowerCase().includes("high demand") ||
+      err?.message?.toLowerCase().includes("overloaded");
+
+    if (isUnavailable) {
+      console.warn(`[fallback] Primary model 503 after retries. Falling back to ${FALLBACK_MODEL}...`);
+      response = await withGeminiBackoff(() =>
+        ai.models.generateContent({ model: FALLBACK_MODEL, ...callConfig })
+      );
+    } else {
+      throw err;
+    }
+  }
 
   const facts: ExtractedFact[] = [];
   const candidates = response.candidates ?? [];
